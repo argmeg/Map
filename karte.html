@@ -1,0 +1,164 @@
+# =====================================================
+# PACKAGES
+# =====================================================
+library(sf)
+library(dplyr)
+library(jsonlite)
+
+# =====================================================
+# LOAD DATA
+# =====================================================
+daten_fin_1 <- read.csv("daten_fin_1.csv", fileEncoding = "latin1")
+
+kant.map <- st_read(
+  "shapefiles/K4kant20260101gf_ch2007Poly.shp",
+  quiet = TRUE
+)
+
+# join data
+kant.map <- kant.map %>%
+  left_join(daten_fin_1, by = c("name" = "Kanton")) %>%
+  st_transform(4326)
+
+# =====================================================
+# EXPORT GEOJSON (for HTML/JS)
+# =====================================================
+st_write(
+  kant.map,
+  "kanton.geojson",
+  driver = "GeoJSON",
+  delete_dsn = TRUE
+)
+
+# =====================================================
+# OPTIONAL CHECK
+# =====================================================
+print("GeoJSON created successfully!")
+print(names(kant.map))
+
+<!DOCTYPE html>
+  <html>
+  <head>
+  <meta charset="utf-8" />
+    <title>Schweiz Karte</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+      
+      <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+      }
+    
+    #map {
+    height: 100vh;
+    width: 100%;
+    }
+
+#panel {
+position: absolute;
+top: 10px;
+left: 10px;
+z-index: 9999;
+background: white;
+padding: 10px;
+border-radius: 6px;
+box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+}
+
+select {
+  padding: 5px;
+}
+</style>
+  </head>
+  
+  <body>
+  
+  <div id="panel">
+  <label>Farbvariable:</label><br>
+  <select id="varSelect">
+  <option value="Ergeb">JA Stimmen</option>
+  <option value="EU_EFTA_Anteil">EU Anteil</option>
+  <option value="NonEU_Anteil">Non-EU Anteil</option>
+  <option value="EU_growth_2015_2024">EU Wachstum</option>
+  <option value="NonEU_growth_2015_2024">Non-EU Wachstum</option>
+  </select>
+  </div>
+  
+  <div id="map"></div>
+  
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  
+  <script>
+  
+  const map = L.map('map').setView([46.8, 8.3], 7);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+let geojsonLayer;
+let geoData;
+
+// color scale similar to R (RdYlGn style)
+function getColor(d, min, max) {
+  const ratio = (d - min) / (max - min);
+  
+  if (ratio > 0.8) return '#1a9850';
+  if (ratio > 0.6) return '#66bd63';
+  if (ratio > 0.4) return '#a6d96a';
+  if (ratio > 0.2) return '#fdae61';
+  return '#d73027';
+}
+
+function render(varName) {
+  
+  if (geojsonLayer) {
+    map.removeLayer(geojsonLayer);
+  }
+  
+  const values = geoData.features
+  .map(f => f.properties[varName])
+  .filter(v => v != null);
+  
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  
+  geojsonLayer = L.geoJson(geoData, {
+    style: function(feature) {
+      const v = feature.properties[varName];
+      
+      return {
+        fillColor: getColor(v, min, max),
+        weight: 1,
+        color: "white",
+        fillOpacity: 0.75
+      };
+    },
+    
+    onEachFeature: function(feature, layer) {
+      
+      layer.bindPopup(
+        `<b>${feature.properties.Kanton || feature.properties.name}</b><br><br>
+          JA Stimmen: ${feature.properties.Ergeb?.toFixed?.(2) ?? "NA"}%<br>
+          EU Anteil: ${feature.properties.EU_EFTA_Anteil ?? "NA"}<br>
+          Non-EU Anteil: ${feature.properties.NonEU_Anteil ?? "NA"}`
+      );
+    }
+  }).addTo(map);
+}
+
+d3.json("kanton.geojson").then(function(data) {
+  geoData = data;
+  render("Ergeb");
+});
+
+document.getElementById("varSelect").addEventListener("change", function(e) {
+  render(e.target.value);
+});
+
+</script>
+  
+  </body>
+  </html>
